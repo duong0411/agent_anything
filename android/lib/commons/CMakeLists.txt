@@ -27,12 +27,12 @@ project(RunAnywhereCommons
 
 option(RAC_BUILD_JNI "Build JNI bridge for Android/JVM" OFF)
 option(RAC_BUILD_TESTS "Build unit tests" OFF)
-option(RAC_BUILD_SHARED "Build shared libraries" ON)
+option(RAC_BUILD_SHARED "Build shared libraries" OFF)
 option(RAC_BUILD_PLATFORM "Build platform backend (Apple Foundation Models, System TTS)" ON)
-option(RAC_BUILD_BACKENDS "Build ML backends (LlamaCPP, ONNX, WhisperCPP)" ON)
+option(RAC_BUILD_BACKENDS "Build ML backends (LlamaCPP, ONNX, WhisperCPP)" OFF)
 option(RAC_BACKEND_LLAMACPP "Build LlamaCPP backend" ON)
-option(RAC_BACKEND_ONNX "Build ONNX backend" OFF)
-option(RAC_BACKEND_WHISPERCPP "Build WhisperCPP backend" OFF)
+option(RAC_BACKEND_ONNX "Build ONNX backend" ON)
+option(RAC_BACKEND_WHISPERCPP "Build WhisperCPP backend" ON)
 
 # =============================================================================
 # C++ CONFIGURATION
@@ -207,7 +207,6 @@ set(RAC_COMMONS_SOURCES
     ${RAC_INFRASTRUCTURE_SOURCES}
     ${RAC_FEATURES_SOURCES}
     ${RAC_PLATFORM_SOURCES}
-    src/features/platform/native_platform_adapter.cpp
 )
 
 # =============================================================================

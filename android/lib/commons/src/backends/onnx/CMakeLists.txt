@@ -193,7 +193,31 @@ elseif(RAC_PLATFORM_MACOS)
     )
 endif()
 
+# =============================================================================
+# JNI TARGET (Android)
+# =============================================================================
 
+if(RAC_PLATFORM_ANDROID AND RAC_BUILD_SHARED)
+    if(ANDROID)
+        message(STATUS "Building ONNX JNI bridge for Android")
+
+        add_library(rac_backend_onnx_jni SHARED jni/rac_backend_onnx_jni.cpp)
+
+        target_include_directories(rac_backend_onnx_jni PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/include
+        )
+
+        target_link_libraries(rac_backend_onnx_jni PRIVATE
+            rac_backend_onnx
+            log
+        )
+
+        target_compile_options(rac_backend_onnx_jni PRIVATE -O3 -fvisibility=hidden -ffunction-sections -fdata-sections)
+        # 16KB page alignment for Android 15+ (API 35) compliance - required Nov 2025
+        target_link_options(rac_backend_onnx_jni PRIVATE -Wl,--gc-sections -Wl,-z,max-page-size=16384)
+    endif()
+endif()
 
 # =============================================================================
 # Summary

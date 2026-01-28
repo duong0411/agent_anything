@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io';
-
-import 'core/rac_core.dart';
-import 'features/llm/llm_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'ffi/chat_service.dart';
+import 'ffi/chat_message.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,9 +13,13 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'RunAnywhere Chat',
+      title: 'AI Chat',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.deepPurple,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
       ),
       home: const ChatScreen(),
@@ -34,94 +35,113 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final TextEditingController _controller = TextEditingController();
+  final ChatService _chatService = ChatService();
+  final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<Map<String, String>> _messages = [];
-  final LlmService _llmService = LlmService();
-  bool _isModelLoaded = false;
-  bool _isGenerating = false;
-  String _status = "Initializing...";
+  
+  bool _isLoading = true;
+  String _statusMessage = 'Initializing...';
 
   @override
   void initState() {
     super.initState();
-    _initSdk();
+    _initializeChat();
   }
 
-  Future<void> _initSdk() async {
+  Future<void> _initializeChat() async {
     try {
-      // 1. Initialize Core
-      RacCore.initialize();
+      setState(() {
+        _statusMessage = 'Requesting permissions...';
+      });
+
+      // Request permissions
+      await _requestPermissions();
+
+      setState(() {
+        _statusMessage = 'Initializing FFI...';
+      });
+
+      await _chatService.initialize();
+
+      setState(() {
+        _statusMessage = 'Loading model...';
+      });
+
+      // TODO: Update this path to your actual model file
+      // Option 1: From assets (place model in assets/models/)
+      final modelPath = '/storage/emulated/0/Download/smollm2-360m-instruct-q4_k_m.gguf';
       
-      // 2. Load Model (Copy from assets to internal storage if needed)
-      // Note: For demo simplicity, we assume the model is manually placed or we download it.
-      // But here we will try to look for a known path or asset.
-      // REPLACE THIS PATH with your actual model path on device
-      // e.g. /data/user/0/com.example.flutter_application_1/app_flutter/model.gguf
-      final  dir = await getApplicationDocumentsDirectory();
-      final modelPath = "${dir.path}/model.gguf";
+      // Option 2: From external storage
+      // final modelPath = '/storage/emulated/0/Download/your-model.gguf';
+
+      final modelLoaded = await _chatService.loadModel(modelPath);
       
-      // Check if model exists, if not, show instruction
-      if (!File(modelPath).existsSync()) {
+      if (!modelLoaded) {
         setState(() {
-          _status = "Model not found at $modelPath.\nPlease copy a .gguf model there.";
+          _statusMessage = 'Failed to load model';
+          _isLoading = false;
         });
         return;
       }
 
       setState(() {
-        _status = "Loading model...";
+        _statusMessage = 'Setting system prompt...';
       });
 
-      await _llmService.loadModel(modelPath);
+      // System prompt
+      const systemPrompt = '''You are a helpful AI assistant. You provide clear, accurate, and concise answers.
+Be friendly and professional. If you don't know something, admit it rather than making up information.''';
 
-      setState(() {
-        _isModelLoaded = true;
-        _status = "Ready";
-      });
-    } catch (e) {
-      setState(() {
-        _status = "Error: $e";
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _llmService.dispose();
-    _controller.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty || !_isModelLoaded || _isGenerating) return;
-
-    _controller.clear();
-    setState(() {
-      _messages.add({"role": "user", "content": text});
-      _isGenerating = true;
-    });
-    
-    _scrollToBottom();
-
-    try {
-      final response = await _llmService.generate(text);
+      final promptSet = await _chatService.setSystemPrompt(systemPrompt);
       
+      if (!promptSet) {
+        setState(() {
+          _statusMessage = 'Failed to set system prompt';
+          _isLoading = false;
+        });
+        return;
+      }
+
       setState(() {
-        _messages.add({"role": "assistant", "content": response});
+        _isLoading = false;
+        _statusMessage = 'Ready to chat!';
       });
+
+      print('System info: ${_chatService.getSystemInfo()}');
     } catch (e) {
       setState(() {
-        _messages.add({"role": "system", "content": "Error: $e"});
+        _statusMessage = 'Error: $e';
+        _isLoading = false;
       });
-    } finally {
-      setState(() {
-        _isGenerating = false;
-      });
-      _scrollToBottom();
+      print('Initialization error: $e');
     }
+  }
+
+  Future<void> _requestPermissions() async {
+    // Request storage permissions
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.storage,
+      Permission.manageExternalStorage,
+    ].request();
+
+    if (statuses[Permission.storage]!.isGranted || 
+        statuses[Permission.manageExternalStorage]!.isGranted) {
+      print('Storage permissions granted');
+    } else {
+      print('Storage permissions denied');
+      // On Android 11+, we might need to open settings for Manage External Storage
+      if (await Permission.manageExternalStorage.isPermanentlyDenied) {
+        openAppSettings();
+      }
+    }
+  }
+
+  void _handleSubmitted(String text) {
+    _textController.clear();
+    if (text.trim().isEmpty) return;
+
+    _chatService.sendMessage(text.trim());
+    _scrollToBottom();
   }
 
   void _scrollToBottom() {
@@ -140,73 +160,175 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('RunAnywhere Chat'),
+        title: const Text('AI Chat'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(20),
-            child: 
-            Text(_status, style: const TextStyle(fontSize: 12))
-        ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(8),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final msg = _messages[index];
-                final isUser = msg['role'] == 'user';
-                final isSystem = msg['role'] == 'system';
-                
-                return Align(
-                  alignment: isSystem ? Alignment.center : (isUser ? Alignment.centerRight : Alignment.centerLeft),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isSystem 
-                          ? Colors.red.shade100 
-                          : (isUser ? Colors.blue.shade100 : Colors.grey.shade200),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
-                    child: Text(msg['content'] ?? ""),
-                  ),
-                );
+        actions: [
+          if (!_isLoading)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                _chatService.resetConversation();
               },
+              tooltip: 'Reset conversation',
             ),
-          ),
-          if (_isGenerating)
-             const Padding(
-               padding: EdgeInsets.all(8.0),
-               child: LinearProgressIndicator(),
-             ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
+        ],
+      ),
+      body: _isLoading
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(_statusMessage),
+                ],
+              ),
+            )
+          : Column(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    decoration: const InputDecoration(
-                      hintText: 'Type a message...',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
+                  child: StreamBuilder<List<ChatMessage>>(
+                    stream: _chatService.messages,
+                    initialData: _chatService.currentMessages,
+                    builder: (context, snapshot) {
+                      final messages = snapshot.data ?? [];
+                      
+                      if (messages.isEmpty || messages.length == 1) {
+                        return Center(
+                          child: Text(
+                            'Start chatting!',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        );
+                      }
+
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _scrollToBottom();
+                      });
+
+                      return ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(8.0),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final message = messages[index];
+                          
+                          // Don't show system message in UI
+                          if (message.role == MessageRole.system) {
+                            return const SizedBox.shrink();
+                          }
+
+                          return _buildMessageBubble(message);
+                        },
+                      );
+                    },
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: _sendMessage,
-                ),
+                const Divider(height: 1),
+                _buildInputArea(),
               ],
             ),
+    );
+  }
+
+  Widget _buildMessageBubble(ChatMessage message) {
+    final isUser = message.role == MessageRole.user;
+    
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+        padding: const EdgeInsets.all(12.0),
+        decoration: BoxDecoration(
+          color: isUser 
+              ? Colors.blue[700] 
+              : Colors.grey[800],
+          borderRadius: BorderRadius.circular(12.0),
+        ),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isUser ? 'You' : 'AI',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: Colors.grey[300],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              message.content,
+              style: const TextStyle(fontSize: 16),
+            ),
+            if (!message.isComplete)
+              const Padding(
+                padding: EdgeInsets.only(top: 8.0),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
+      child: Row(
+        children: [
+          if (_chatService.isGenerating)
+            IconButton(
+              icon: const Icon(Icons.stop),
+              onPressed: () {
+                _chatService.stopGeneration();
+              },
+              tooltip: 'Stop generation',
+            )
+          else
+            const SizedBox(width: 48),
+          Expanded(
+            child: TextField(
+              controller: _textController,
+              decoration: const InputDecoration(
+                hintText: 'Type a message...',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 12.0,
+                ),
+              ),
+              maxLines: null,
+              textCapitalization: TextCapitalization.sentences,
+              enabled: !_chatService.isGenerating,
+              onSubmitted: _handleSubmitted,
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.send),
+            onPressed: _chatService.isGenerating
+                ? null
+                : () => _handleSubmitted(_textController.text),
+            tooltip: 'Send',
           ),
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    _scrollController.dispose();
+    _chatService.dispose();
+    super.dispose();
   }
 }

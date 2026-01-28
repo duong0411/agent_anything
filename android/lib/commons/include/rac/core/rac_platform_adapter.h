@@ -337,12 +337,4 @@ RAC_API rac_bool_t rac_framework_is_platform_service(rac_inference_framework_t f
 }
 #endif
 
-/**
- * Helper to initialize a platform adapter with native (C++) defaults.
- * Implements file I/O using std::filesystem/stdio and time using std::chrono.
- *
- * @param adapter Pointer to adapter struct to populate
- */
-RAC_API void rac_platform_adapter_init_native(rac_platform_adapter_t* adapter);
-
 #endif /* RAC_PLATFORM_ADAPTER_H */

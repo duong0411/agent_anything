@@ -28,6 +28,12 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // Speed up build by only building for ARM64 
+        // (Remove this if you need to run on Emulator x86 or old phones)
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -40,7 +46,7 @@ android {
 
     externalNativeBuild {
         cmake {
-            path = file("../lib/commons/CMakeLists.txt")
+            path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
@@ -51,7 +57,6 @@ flutter {
 }
 
 dependencies {
-    implementation(project(":lib"))
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     testImplementation("junit:junit:4.13.2")
